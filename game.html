@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  --green: #00ffaa;
+  --dark:  #0a0a0f;
+  --panel: #13131f;
+  --border:#ffffff18;
+}
+html, body {
+  background: var(--dark);
+  color: #fff;
+  font-family: 'Courier New', monospace;
+  overflow: hidden;
+  width: 100%; height: 100%;
+  touch-action: none;
+  user-select: none;
+}
+
+/* ── GAME (PC) ────────────────────────────────── */
+#gameView { display:none; position:relative; width:100%; height:100vh; }
+#gameCanvas { display:block; }
+
+#hud {
+  position:fixed; top:0; left:0; right:0;
+  display:flex; justify-content:space-between; align-items:flex-start;
+  padding:14px 20px; pointer-events:none; z-index:10;
+}
+.hud-label { font-size:9px; letter-spacing:2px; color:#555; text-transform:uppercase; }
+.hud-val   { font-size:20px; font-weight:bold; line-height:1.2; }
+
+#connBadge {
+  position:fixed; top:14px; left:50%; transform:translateX(-50%);
+  display:flex; align-items:center; gap:6px;
+  background:#ffffff09; border:1px solid var(--border);
+  border-radius:20px; padding:4px 14px; font-size:11px; color:#555;
+  z-index:10; pointer-events:none; transition:all .3s; white-space:nowrap;
+}
+#connBadge.on { color:var(--green); border-color:#00ffaa33; }
+#connDot { width:6px; height:6px; border-radius:50%; background:#333; transition:background .3s; }
+#connBadge.on #connDot { background:var(--green); box-shadow:0 0 6px var(--green); }
+
+#tiltBar {
+  position:fixed; bottom:22px; left:50%; transform:translateX(-50%);
+  width:180px; pointer-events:none; z-index:10;
+}
+#tiltTrack { height:4px; background:#1e1e2e; border-radius:2px; position:relative; }
+#tiltFill  { position:absolute; top:0; height:4px; background:var(--green); border-radius:2px; opacity:.6; }
+#tiltDot   {
+  position:absolute; top:50%; transform:translate(-50%,-50%);
+  width:12px; height:12px; background:var(--green); border-radius:50%;
+  box-shadow:0 0 8px #00ffaa88; transition:left .05s;
+}
+
+#qrPanel {
+  position:fixed; bottom:20px; right:20px;
+  background:var(--panel); border:1px solid var(--border);
+  border-radius:12px; padding:14px; z-index:15;
+  display:flex; flex-direction:column; align-items:center; gap:8px;
+  transition:opacity .4s;
+}
+#qrPanel.hidden { opacity:0; pointer-events:none; }
+#qrPanel canvas { border-radius:6px; }
+#qrLabel   { font-size:9px; letter-spacing:1.5px; color:#555; text-transform:uppercase; }
+#roomIdTxt { font-size:10px; color:#666; letter-spacing:.5px; }
+
+/* Game overlay */
+#gameOverlay {
+  position:fixed; inset:0; background:#0a0a0fee;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  z-index:20; gap:14px; text-align:center; padding:28px;
+}
+#gameOverlay h1 {
+  font-size:34px; letter-spacing:4px;
+  color:var(--green); text-shadow:0 0 24px #00ffaa33;
+}
+.go-sub   { font-size:10px; color:#555; letter-spacing:3px; }
+.go-box   {
+  background:#ffffff06; border:1px solid var(--border);
+  border-radius:12px; padding:14px 22px;
+  font-size:12px; color:#888; line-height:2.2; max-width:300px;
+}
+.go-box b { color:var(--green); }
+.go-score { font-size:14px; color:#666; }
+.go-score span { color:#fff; font-size:30px; display:block; margin-top:4px; }
+#startBtn {
+  background:var(--green); color:#0a0a0f; border:none;
+  padding:12px 36px; font-size:14px; font-weight:bold;
+  font-family:'Courier New',monospace; letter-spacing:3px;
+  border-radius:6px; cursor:pointer; margin-top:4px;
+}
+#startBtn:active { transform:scale(.97); }
+#waitMsg { font-size:11px; color:#555; }
+
+/* ── CONTROLLER (Phone) ───────────────────────── */
+#ctrlView {
+  display:none; width:100%; height:100vh;
+  flex-direction:column; align-items:center; justify-content:center; gap:0;
+}
+.ctrl-header { font-size:10px; letter-spacing:3px; color:#555; text-transform:uppercase; margin-bottom:6px; }
+#ctrlTitle   { font-size:26px; letter-spacing:4px; color:var(--green); text-shadow:0 0 20px #00ffaa22; margin-bottom:4px; }
+#ctrlStatus  { font-size:11px; color:#666; margin-bottom:28px; letter-spacing:1px; }
+#ctrlStatus.ok { color:var(--green); }
+
+#steeringWrap { width:200px; height:200px; position:relative; margin-bottom:28px; }
+#wheelSvg { width:100%; height:100%; }
+
+#tiltReadout {
+  font-size:40px; font-weight:bold; color:#fff;
+  font-variant-numeric:tabular-nums; letter-spacing:-1px; margin-bottom:4px;
+}
+#dirLabel  { font-size:11px; letter-spacing:3px; color:#555; text-transform:uppercase; height:18px; margin-bottom:28px; }
+
+#ctrlBtns  { display:flex; gap:14px; }
+.ctrlBtn   {
+  width:76px; height:76px; border-radius:50%;
+  background:#ffffff08; border:1px solid var(--border);
+  display:flex; align-items:center; justify-content:center;
+  font-size:26px; cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
+.ctrlBtn:active { background:#ffffff18; }
+#permBtn {
+  background:var(--green); color:#0a0a0f; border:none;
+  padding:12px 28px; font-size:13px; font-weight:bold;
+  font-family:'Courier New',monospace; letter-spacing:2px;
+  border-radius:6px; cursor:pointer; display:none; margin-top:14px;
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ GAME VIEW (PC) ═══════════════════════════════════ -->
+<div id="gameView">
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="hud">
+    <div>
+      <div class="hud-label">Score</div>
+      <div class="hud-val" id="scoreDisplay">0</div>
+    </div>
+    <div style="text-align:right">
+      <div class="hud-label">Best</div>
+      <div class="hud-val" id="bestDisplay">0</div>
+    </div>
+  </div>
+
+  <div id="connBadge"><div id="connDot"></div><span id="connText">waiting for phone…</span></div>
+
+  <div id="tiltBar">
+    <div id="tiltTrack">
+      <div id="tiltFill"></div>
+      <div id="tiltDot" style="left:90px"></div>
+    </div>
+  </div>
+
+  <div id="qrPanel">
+    <div id="qrLabel">Scan with phone</div>
+    <canvas id="qrCanvas"></canvas>
+    <div id="roomIdTxt"></div>
+  </div>
+
+  <div id="gameOverlay">
+    <h1>TILT RACER</h1>
+    <div class="go-sub">PHONE-CONTROLLED RACING</div>
+    <div class="go-box">
+      <b>1.</b> Open this app on your <b>PC</b><br>
+      <b>2.</b> Scan the QR with your <b>phone</b><br>
+      <b>3.</b> Hold phone flat like a <b>steering wheel</b><br>
+      <b>4.</b> Tilt left/right to <b>dodge traffic!</b>
+    </div>
+    <div id="waitMsg">📱 Scan QR code first → then press Start</div>
+    <button id="startBtn" onclick="tryStart()">START GAME</button>
+  </div>
+</div>
+
+<!-- ═══ CONTROLLER VIEW (Phone) ══════════════════════════ -->
+<div id="ctrlView">
+  <div class="ctrl-header">Tilt Racer</div>
+  <div id="ctrlTitle">CONTROLLER</div>
+  <div id="ctrlStatus">Connecting…</div>
+
+  <div id="steeringWrap">
+    <svg id="wheelSvg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+      <!-- outer ring background -->
+      <circle cx="100" cy="100" r="88" fill="none" stroke="#1a1a2e" stroke-width="18"/>
+      <!-- progress arc -->
+      <circle cx="100" cy="100" r="88" fill="none" stroke="#00ffaa" stroke-width="18"
+        stroke-dasharray="553" stroke-dashoffset="553"
+        id="wheelArc" stroke-linecap="round"
+        style="transform-origin:100px 100px; transition:stroke-dashoffset .08s, stroke .08s;"/>
+      <!-- spokes -->
+      <line x1="100" y1="74" x2="100" y2="12" stroke="#1e1e2e" stroke-width="10" stroke-linecap="round"/>
+      <line x1="100" y1="74" x2="100" y2="12" stroke="#2a2a3a" stroke-width="6" stroke-linecap="round"/>
+      <line x1="76" y1="116" x2="20" y2="146" stroke="#1e1e2e" stroke-width="10" stroke-linecap="round"/>
+      <line x1="76" y1="116" x2="20" y2="146" stroke="#2a2a3a" stroke-width="6" stroke-linecap="round"/>
+      <line x1="124" y1="116" x2="180" y2="146" stroke="#1e1e2e" stroke-width="10" stroke-linecap="round"/>
+      <line x1="124" y1="116" x2="180" y2="146" stroke="#2a2a3a" stroke-width="6" stroke-linecap="round"/>
+      <!-- hub -->
+      <circle cx="100" cy="100" r="24" fill="#13131f" stroke="#2a2a3a" stroke-width="2"/>
+      <!-- top dot (rotation indicator) -->
+      <circle cx="100" cy="12" r="9" fill="#00ffaa" opacity=".9"/>
+    </svg>
+  </div>
+
+  <div id="tiltReadout">0°</div>
+  <div id="dirLabel">— CENTER —</div>
+
+  <div id="ctrlBtns">
+    <div class="ctrlBtn" id="leftBtn">◀</div>
+    <div class="ctrlBtn" id="rightBtn">▶</div>
+  </div>
+
+  <button id="permBtn" onclick="requestPerm()">Allow Motion Sensor</button>
+</div>
+
+<script>
+// ── Injected by Python / Streamlit ──────────────────────
+const CTRL_ID = "__CTRL_ID__";          // peer ID of the game host
+const isController = CTRL_ID !== "";
+
+// ── Game state ──────────────────────────────────────────
+const G = {
+  running:false, score:0, best:0, lives:3,
+  tilt:0, playerX:0, obstacles:[], particles:[],
+  roadLines:[], speed:4, spawnTimer:0, spawnInterval:80,
+  invincible:0, shake:0
+};
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let W, H, LANE_W, CAR_W, CAR_H;
+const LANES = 4;
+
+function resize() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  LANE_W = Math.min(W / LANES, 110);
+  CAR_W = LANE_W * 0.55;
+  CAR_H = CAR_W * 1.8;
+}
+resize();
+window.addEventListener('resize', () => { resize(); });
+
+function laneX(l) {
+  return (W - LANE_W * LANES) / 2 + l * LANE_W + LANE_W / 2;
+}
+
+// ── Peer setup ──────────────────────────────────────────
+function initPeer() {
+  if (isController) { setupController(); return; }
+  setupGame();
+}
+
+let gamePeer, phoneConn;
+
+function setupGame() {
+  document.getElementById('gameView').style.display = 'block';
+  gamePeer = new Peer(undefined, { debug:0 });
+  gamePeer.on('open', id => {
+    buildQR(id);
+    document.getElementById('roomIdTxt').textContent = 'ID: ' + id.slice(0,8) + '…';
+  });
+  gamePeer.on('connection', conn => {
+    phoneConn = conn;
+    conn.on('open', () => {
+      document.getElementById('connBadge').classList.add('on');
+      document.getElementById('connText').textContent = 'phone connected ✓';
+      document.getElementById('qrPanel').classList.add('hidden');
+      document.getElementById('waitMsg').textContent = '✅ Phone ready — press Start!';
+    });
+    conn.on('data', d => {
+      if (d.type === 'tilt') {
+        G.tilt = d.value;
+        paintTiltBar(d.value);
+      }
+    });
+    conn.on('close', () => {
+      document.getElementById('connBadge').classList.remove('on');
+      document.getElementById('connText').textContent = 'phone disconnected';
+    });
+  });
+}
+
+function buildQR(peerId) {
+  // Build controller URL: same base URL but with ?ctrl=PEER_ID
+  // Works both locally and on Streamlit Cloud
+  const base = location.href.split('?')[0];
+  const url  = base + '?ctrl=' + peerId;
+  QRCode.toCanvas(document.getElementById('qrCanvas'), url, {
+    width: 110, margin:1,
+    color: { dark:'#00ffaa', light:'#13131f' }
+  });
+}
+
+function paintTiltBar(v) {
+  const BAR = 180;
+  const px  = ((v + 1) / 2) * BAR;
+  document.getElementById('tiltDot').style.left = px + 'px';
+  const fill = document.getElementById('tiltFill');
+  const mid  = BAR / 2;
+  if (v < 0) { fill.style.left = px + 'px'; fill.style.width = (mid - px) + 'px'; }
+  else        { fill.style.left = mid + 'px'; fill.style.width = (px - mid) + 'px'; }
+}
+
+// ── Game ────────────────────────────────────────────────
+const KEYS = {};
+window.addEventListener('keydown', e => KEYS[e.key] = true);
+window.addEventListener('keyup',   e => KEYS[e.key] = false);
+
+function input() {
+  let v = G.tilt;
+  if (KEYS['ArrowLeft']  || KEYS['a'] || KEYS['A']) v = -1;
+  if (KEYS['ArrowRight'] || KEYS['d'] || KEYS['D']) v =  1;
+  return v;
+}
+
+function tryStart() {
+  Object.assign(G, {
+    running:true, score:0, lives:3, tilt:0,
+    obstacles:[], particles:[], speed:4,
+    spawnTimer:0, spawnInterval:80,
+    invincible:0, shake:0
+  });
+  G.playerX = laneX(1.5);
+  G.roadLines = Array.from({length:14}, (_,i) => ({ y:(H/14)*i }));
+  document.getElementById('gameOverlay').style.display = 'none';
+  gameLoop();
+}
+
+const COLORS = ['#ff4444','#4488ff','#ffaa00','#ff44bb','#aa44ff','#ff8833'];
+
+function spawnObs() {
+  const taken = G.obstacles.filter(o=>o.y<0&&o.y>-CAR_H*2).map(o=>o.lane);
+  const free  = [0,1,2,3].filter(l=>!taken.includes(l));
+  if (!free.length) return;
+  const l = free[Math.floor(Math.random()*free.length)];
+  G.obstacles.push({ lane:l, x:laneX(l), y:-CAR_H,
+    color:COLORS[Math.floor(Math.random()*COLORS.length)], w:CAR_W, h:CAR_H });
+}
+
+function drawCar(x, y, w, h, color, flip) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.roundRect(x-w/2, y-h/2, w, h, w*0.1);
+  ctx.fill();
+  // windshield
+  ctx.fillStyle = '#00000055';
+  const wh = h*0.22, wy = flip ? y+h/2-wh-h*0.08 : y-h/2+h*0.08;
+  ctx.fillRect(x-w*0.32, wy, w*0.64, wh);
+  // wheels
+  ctx.fillStyle = '#111';
+  const ww=w*0.22, wlh=h*0.18, wy2=flip?h*0.18:-h*0.18;
+  [-1,1].forEach(s => {
+    const wx = x + s*(w/2 - ww*0.4);
+    ctx.fillRect(wx-ww/2, y+wy2-wlh/2, ww, wlh);
+    ctx.fillRect(wx-ww/2, y-wy2-wlh/2, ww, wlh);
+  });
+  // lights
+  ctx.fillStyle = flip ? '#ff5555' : '#ffff88';
+  const ly = flip ? y+h/2-h*0.06 : y-h/2+h*0.06;
+  [-0.28,0.28].forEach(ox => {
+    ctx.beginPath(); ctx.arc(x+ox*w, ly, w*0.09, 0, Math.PI*2); ctx.fill();
+  });
+}
+
+function burst(x, y) {
+  for (let i=0; i<20; i++) {
+    const a=Math.random()*Math.PI*2, s=2+Math.random()*6;
+    G.particles.push({ x, y, vx:Math.cos(a)*s, vy:Math.sin(a)*s,
+      life:1, color:Math.random()>.5?'#ff4444':'#ffaa00', r:3+Math.random()*5 });
+  }
+}
+
+function updateHUD() {
+  document.getElementById('scoreDisplay').textContent = G.score;
+  document.getElementById('bestDisplay').textContent  = G.best;
+}
+
+function gameLoop() {
+  if (!G.running) return;
+  requestAnimationFrame(gameLoop);
+
+  const v = input();
+  const rl = (W - LANE_W*LANES) / 2, rr = rl + LANE_W*LANES;
+
+  G.playerX = Math.max(rl+CAR_W/2, Math.min(rr-CAR_W/2, G.playerX + v*G.speed*0.8));
+  G.roadLines.forEach(l => { l.y += G.speed; if (l.y > H) l.y -= H; });
+
+  G.spawnTimer++;
+  if (G.spawnTimer >= G.spawnInterval) {
+    G.spawnTimer = 0; spawnObs();
+    G.spawnInterval = Math.max(26, G.spawnInterval - 0.4);
+  }
+
+  G.obstacles.forEach(o => o.y += G.speed * 1.12);
+  G.obstacles = G.obstacles.filter(o => o.y < H + CAR_H);
+
+  const py = H - CAR_H * 1.2;
+  if (G.invincible <= 0) {
+    G.obstacles.forEach(o => {
+      if (Math.abs(o.x-G.playerX) < CAR_W*0.8 && Math.abs(o.y-py) < CAR_H*0.7) {
+        G.lives--; G.invincible = 120; G.shake = 18;
+        burst(G.playerX, py); updateHUD();
+        if (G.lives <= 0) endGame();
+      }
+    });
+  } else G.invincible--;
+
+  G.score++;
+  G.speed = 4 + G.score / 380;
+  if (G.score % 60 === 0) updateHUD();
+
+  G.particles.forEach(p => { p.x+=p.vx; p.y+=p.vy; p.vy+=0.15; p.life-=0.03; });
+  G.particles = G.particles.filter(p => p.life > 0);
+
+  // ── Draw ───────────────────────────────────────────────
+  ctx.save();
+  if (G.shake > 0) {
+    ctx.translate((Math.random()-.5)*G.shake, (Math.random()-.5)*G.shake);
+    G.shake *= 0.82; if (G.shake < 0.5) G.shake = 0;
+  }
+
+  ctx.fillStyle = '#0a0a0f'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = '#12121e'; ctx.fillRect(rl,0,LANE_W*LANES,H);
+
+  // Road edges
+  ctx.strokeStyle = '#00ffaa44'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(rl,0); ctx.lineTo(rl,H);
+  ctx.moveTo(rr,0); ctx.lineTo(rr,H); ctx.stroke();
+
+  // Lane dividers
+  ctx.strokeStyle = '#ffffff13'; ctx.lineWidth = 1.5; ctx.setLineDash([38,26]);
+  for (let i=1; i<LANES; i++) {
+    const lx = rl + i*LANE_W;
+    ctx.beginPath(); ctx.moveTo(lx,0); ctx.lineTo(lx,H); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Speed lines
+  ctx.strokeStyle = '#ffffff06'; ctx.lineWidth = 2;
+  G.roadLines.forEach(l => {
+    ctx.beginPath(); ctx.moveTo(rl+14,l.y); ctx.lineTo(rr-14,l.y); ctx.stroke();
+  });
+
+  // Obstacles
+  G.obstacles.forEach(o => drawCar(o.x, o.y, o.w, o.h, o.color, true));
+
+  // Player
+  const flash = G.invincible > 0 && Math.floor(G.invincible/8) % 2 === 0;
+  if (!flash) {
+    drawCar(G.playerX, py, CAR_W, CAR_H, '#00ffaa', false);
+    const grd = ctx.createRadialGradient(G.playerX, py+CAR_H/2, 0, G.playerX, py+CAR_H/2, CAR_W);
+    grd.addColorStop(0,'#00ffaa25'); grd.addColorStop(1,'transparent');
+    ctx.fillStyle = grd; ctx.fillRect(G.playerX-CAR_W, py, CAR_W*2, CAR_H/2);
+  }
+
+  // Particles
+  G.particles.forEach(p => {
+    ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r*p.life, 0, Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  // Hearts
+  ctx.font = '15px serif';
+  for (let i=0; i<3; i++) {
+    ctx.globalAlpha = i < G.lives ? 1 : 0.2;
+    ctx.fillText('❤️', W/2 - 26 + i*22, 30);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+function endGame() {
+  G.running = false;
+  if (G.score > G.best) G.best = G.score;
+  updateHUD();
+  const ov = document.getElementById('gameOverlay');
+  ov.style.display = 'flex';
+  ov.innerHTML = `
+    <h1>GAME OVER</h1>
+    <div class="go-sub">NICE TRY</div>
+    <div class="go-score">YOUR SCORE<span>${G.score}</span></div>
+    <div style="font-size:12px;color:#555;margin-top:-6px">Best: <b style="color:#aaa">${G.best}</b></div>
+    <button id="startBtn" onclick="tryStart()"
+      style="background:#00ffaa;color:#0a0a0f;border:none;padding:12px 36px;font-size:14px;font-weight:bold;font-family:'Courier New',monospace;letter-spacing:3px;border-radius:6px;cursor:pointer;margin-top:8px;">
+      PLAY AGAIN
+    </button>`;
+}
+
+// ── Controller ──────────────────────────────────────────
+let ctrlConn;
+let touchL = false, touchR = false;
+let gamma  = 0;
+
+function setupController() {
+  document.getElementById('ctrlView').style.display = 'flex';
+  const peer = new Peer(undefined, { debug:0 });
+  peer.on('open', () => {
+    ctrlConn = peer.connect(CTRL_ID);
+    ctrlConn.on('open', () => {
+      document.getElementById('ctrlStatus').textContent = 'Connected ✓';
+      document.getElementById('ctrlStatus').classList.add('ok');
+      sendLoop();
+    });
+    ctrlConn.on('error', () => {
+      document.getElementById('ctrlStatus').textContent = 'Connection failed — reload & retry';
+    });
+  });
+  peer.on('error', () => {
+    document.getElementById('ctrlStatus').textContent = 'Could not reach game — check URL';
+  });
+
+  // Touch buttons
+  const lb = document.getElementById('leftBtn');
+  const rb = document.getElementById('rightBtn');
+  lb.addEventListener('touchstart', e => { e.preventDefault(); touchL=true; });
+  lb.addEventListener('touchend',   () => touchL=false);
+  rb.addEventListener('touchstart', e => { e.preventDefault(); touchR=true; });
+  rb.addEventListener('touchend',   () => touchR=false);
+
+  // Motion
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    document.getElementById('permBtn').style.display = 'block';
+  } else {
+    listenMotion();
+  }
+}
+
+function requestPerm() {
+  DeviceOrientationEvent.requestPermission().then(p => {
+    if (p === 'granted') {
+      document.getElementById('permBtn').style.display = 'none';
+      listenMotion();
+    }
+  }).catch(() => {});
+}
+
+function listenMotion() {
+  window.addEventListener('deviceorientation', e => {
+    gamma = e.gamma || 0;
+    renderWheel(gamma);
+  });
+}
+
+function sendLoop() {
+  setInterval(() => {
+    let g = gamma;
+    if (touchL) g = -45;
+    if (touchR) g =  45;
+    const v = Math.max(-1, Math.min(1, g / 45));
+    if (ctrlConn && ctrlConn.open) ctrlConn.send({ type:'tilt', value:v });
+    renderWheel(g);
+  }, 50); // 20 Hz
+}
+
+function renderWheel(g) {
+  const c = Math.max(-45, Math.min(45, g));
+  document.getElementById('wheelSvg').style.transform   = `rotate(${c * 1.2}deg)`;
+  document.getElementById('wheelSvg').style.transition  = 'transform .08s';
+
+  const frac = Math.abs(c) / 45;
+  const arc  = document.getElementById('wheelArc');
+  arc.style.strokeDashoffset = 553 - frac * 553 * 0.55;
+  arc.style.stroke = frac > 0.72 ? '#ff4444' : '#00ffaa';
+
+  document.getElementById('tiltReadout').textContent =
+    Math.round(c) + '°';
+  document.getElementById('dirLabel').textContent =
+    c < -6 ? '◀  LEFT' : c > 6 ? 'RIGHT  ▶' : '— CENTER —';
+}
+
+// ── Boot ────────────────────────────────────────────────
+initPeer();
+</script>
+</body>
+</html>
